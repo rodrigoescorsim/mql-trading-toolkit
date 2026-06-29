@@ -1,0 +1,19 @@
+# MetaTrader compiled binaries
+*.ex4
+*.ex5
+
+# MetaTrader tester reports / caches
+*.tst
+*.fxt
+*.hst
+
+# IDE project files
+.idea/
+*.mqproj
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Binary folders (old compiled builds)
+bin/

@@ -1,0 +1,217 @@
+================================================================================
+  TPX - HEDGE Media9 EA  —  ESPECIFICAÇÃO FINAL PARA IMPLEMENTAÇÃO (MQL4)
+  Base: TPX ATR HEDGE EA v2 (detecção) + TPX - Media9 EA v4 (ideia de MA)
+  Ficheiro EA: TPX - HEDGE Media9 EA.mq4
+================================================================================
+  Estado: REGRAS FECHADAS — implementar conforme este texto.
+================================================================================
+
+
+1. OBJETIVO DO EXPERT
+--------------------------------------------------------------------------------
+  Expert Advisor que monitoriza posições abertas pelo utilizador (ou por
+  outros EAs) na conta e, com base na direção da média móvel (por defeito
+  período 9, configurável) num timeframe configurável, abre ordens a MERCADO
+  no sentido CONTRÁRIO à posição original para efeito de proteção (hedge),
+  quando a MA — avaliada no último candle FECHADO — está em sentido oposto
+  à posição original.
+
+  Não existe neste EA lógica de distância ATR nem ordens STOP pendentes à
+  distância ATR (comportamento do TPX ATR HEDGE EA v2); o gatilho é exclusi-
+  vamente a leitura da MA no fecho de candle.
+
+
+2. ÂMBITO DE MONITORIZAÇÃO (HERDADO DO v2)
+--------------------------------------------------------------------------------
+  2.1  Varredura periódica de todas as posições de mercado (OP_BUY / OP_SELL)
+       da conta, em TODOS os símbolos (comportamento alinhado ao v2).
+  2.2  Ignorar ordens pendentes na deteção de “posição original”.
+  2.3  Ignorar posições cujo Magic Number seja o reservado às ordens abertas
+       por ESTE EA (protecções), para evitar que o EA trate o próprio hedge
+       como nova posição original.
+  2.4  Cada posição original é identificada pelo TICKET e tem um fluxo
+       INDEPENDENTE: registo próprio e cadeia de proteções associadas a esse
+       ticket (várias posições no mesmo símbolo = vários tickets = vários
+       fluxos paralelos).
+
+
+3. SÍMBOLO, TIMEFRAME E PARÂMETROS DA MÉDIA
+--------------------------------------------------------------------------------
+  3.1  Para cada posição original, o cálculo da MA usa sempre o MESMO SÍMBOLO
+       dessa posição (não o símbolo do gráfico onde o EA está anexado).
+  3.2  O TIMEFRAME da MA é um input configurável (ex.: H1, M15). Todas as
+       decisões baseadas em “fecho de candle” referem-se a este timeframe.
+  3.3  Parâmetros da MA (inputs, estilo Media9 v4 exceto LSMA): período (por
+       defeito 9), tipo via iMA — EMA, SMMA, LWMA, SMA (MODE_EMA, MODE_SMMA,
+       MODE_LWMA, MODE_SMA), shift base da série aplicável a iMA().
+       **Versão 1: apenas iMA(); não implementar LSMA** (sem função LSMA
+       custom como no Media9 v4).
+
+
+4. DIREÇÃO DA MA (ÚLTIMO CANDLE FECHADO)
+--------------------------------------------------------------------------------
+  4.1  A avaliação NÃO usa o candle em formação; usa o último candle FECHADO
+       do TF configurado para o símbolo da posição.
+  4.2  Índices MQL4: shift = 1 = “último fechado”. Inclinação no fechamento:
+       comparar MA(1) com MA(2):
+       • MA(1) > MA(2) → direção “ALTA”;
+       • MA(1) < MA(2) → direção “BAIXA”.
+       **Empate MA(1) == MA(2):** manter a **última direção válida** já
+       conhecida até existir desigualdade estrita (não inventar direção nova
+       em caso de empate).
+  4.3  Após fechar um candle do TF configurado, recalcular essa direção e
+       aplicar as regras das secções seguintes.
+
+
+5. REGRAS DE PROTECÇÃO — “MA A FAVOR” VS “MA CONTRA”
+--------------------------------------------------------------------------------
+  Definição:
+  • Original BUY:  MA a FAVOR = ALTA;  MA CONTRA = BAIXA.
+  • Original SELL: MA a FAVOR = BAIXA; MA CONTRA = ALTA.
+
+  5.1  Enquanto a MA estiver a FAVOR da posição original: não abrir proteção;
+       apenas monitorizar e atualizar estado.
+
+  5.2  Quando a MA estiver CONTRA à posição original: condição para abrir
+       proteção a mercado (secções 6 e 7), sempre no sentido OPOSTO à original
+       (BUY → VENDA; SELL → COMPRA).
+
+  5.3  Volume de cada proteção: **iguais aos lotes ATUAIS da posição original**
+       no momento da decisão (reeavaliar a cada nova ordem; após parcial na
+       original usar os lotes remanescentes), com normalização ao passo de
+       lote do símbolo.
+
+
+6. PRIMEIRA PROTECÇÃO — MA JÁ «CONTRA» NO ÚLTIMO CANDLE FECHADO
+--------------------------------------------------------------------------------
+  6.1  Ao registar uma posição nova, calcula-se de imediato a inclinação da MA
+       no último candle fechado (MA em shift 1 vs shift 2, TF configurado,
+       mesmo símbolo da posição).
+  6.2  Se, nessa leitura, a MA já estiver **contra** a posição original e ainda
+       não existir proteção deste EA para esse ticket, abre-se a ordem a
+       mercado **no mesmo ciclo de deteção**, sem esperar o fecho do próximo
+       candle.
+  6.3  Se a MA no último fechado estiver **a favor** (ou irrelevante até haver
+       inclinação definida por empates), não se abre nessa primeira avaliação;
+       a primeira abertura (quando vier a estar «contra») continua possível nos
+       fechos de candle seguintes, como na secção 7 para transições ou quando
+       nH == 0 e against no último fechado.
+
+7. CAMADAS (MODO CONTÍNUO APÓS A PRIMEIRA PROTECÇÃO)
+--------------------------------------------------------------------------------
+  7.1  Existe pelo menos uma proteção do EA para o ticket: modo contínuo até
+       a posição original existir.
+
+  7.2  Em cada fecho de candle do TF, regista-se a direção no último fechado e
+       compara-se com a direção do fecho anterior (transição ALTA ↔ BAIXA).
+
+  7.3  **Novas camadas:** sempre que num fecho de candle a MA passe a estar
+       CONTRA à original **e** esse estado resulte de transição **a FAVOR →
+       CONTRA**, abrir uma nova ordem a mercado — volume = lotes ATUAIS da
+       original (5.3). Reforço sempre no sentido contrário à posição original.
+
+  7.4  São vedadas aberturas “alternadas” sem relação com a original; o
+       espaçamento em camadas segue apenas ciclos favorável→desfavorável.
+
+
+8. FLAG — FECHAR PROTEÇÕES QUANDO A MA VOLTA A FAVOR DA ORIGINAL
+--------------------------------------------------------------------------------
+  Input booleano sugerido: `FecharProtecoesQuandoMaFavoravel`
+  • **true:** no fecho do candle, se a MA passar a FAVOR da original, FECHAR
+    todas as posições abertas por ESTE EA associadas a esse ticket original.
+  • **false:** não fechar por este motivo; proteções ficam (“abre e esquece”
+    face a esta regra).
+
+
+9. FECHO DA POSIÇÃO ORIGINAL
+--------------------------------------------------------------------------------
+  Input booleano sugerido: `FecharProtecoesAoFecharOriginal`
+  • **Por defeito true:** quando o ticket da original deixar de existir,
+    fechar todas as proteções deste EA ligadas a esse ticket.
+  • **false:** ao fechar a original, manter ou não as proteções segundo
+    gestão manual; o EA não as fecha obrigatoriamente.
+
+
+10. ORDENS, MAGIC, COMENTÁRIO E PERSISTÊNCIA CSV
+--------------------------------------------------------------------------------
+  10.1  Execução das proteções: sempre MERCADO (BUY/SELL imediato).
+  10.2  Magic Number: **input configurável** pelo utilizador (valor por
+        defeito escolhido na implementação; não usar 777999 do v2).
+  10.3  Nome do ficheiro CSV e prefixo/fixos de comentário de ordens: **FIXOS
+        no código do EA** (constantes definidas pelo programador neste projeto),
+        distintos do v2 — não obrigatoriamente editáveis pelo utilizador nos
+        inputs.
+  10.4  Ficheiro CSV: **novo nome** exclusivo deste EA (não usar
+        TPX_ATR_HEDGE_pairs.csv). Formato: **uma linha por par
+        ticket_original,ticket_hedge** — o ticket_original **repetir-se**
+        quando houver vários hedges para a mesma original (lista de linhas).
+
+
+11. O QUE ESTE EA NÃO IMPLEMENTA
+--------------------------------------------------------------------------------
+  11.1  Modo “clássico ATR”, inputs ATR ou trailing por ATR como no v2.
+  11.2  Abertura automática de operações tipo Media9 (primeira ordem no tick,
+        TP por ATR específicos do Media9, etc.).
+
+
+12. TIMER / TICK (NOTA IMPLEMENTATIVA)
+--------------------------------------------------------------------------------
+  Garantir varredura mesmo com poucos ticks no símbolo do gráfico (ex.: timer
+  periódico como no v2), lembrando que a lógica de MA depende do **fecho de
+  candle do TF configurado por símbolo** monitorizado.
+
+13. FECHAMENTO PARCIAL DE HEDGE AO RETORNO DA MÉDIA (NOVA FUNCIONALIDADE)
+
+Objetivo:
+Realizar um fechamento parcial automático das ordens de hedge (proteção) quando a Média Móvel voltar a ficar a favor da posição original.
+
+13.1 Parâmetros (Inputs)
+input bool     InpPartialCloseEnabled      = true;    // Habilitar fechamento parcial ao retorno da MA
+input double   InpPartialClosePercent      = 50.0;    // Percentual do lote do hedge a ser fechado (1.0 a 99.0)
+
+13.2 Regras de Atuação
+
+Esta funcionalidade só atua se InpPartialCloseEnabled = true.
+O fechamento parcial ocorre exclusivamente quando a Média Móvel (no último candle fechado) passa de CONTRA para FAVOR da posição original.
+O fechamento parcial só é aplicado nas ordens de hedge que estão no sentido contrário à posição original.
+Hedges abertos no mesmo sentido da posição original (camadas quando InpFecharSeMaFavor = false) não recebem fechamento parcial.
+
+Percentual aplicado: (lote do hedge × InpPartialClosePercent / 100).
+Após o fechamento parcial, o lote restante da hedge permanece aberto (não é fechado totalmente).
+Esta regra é independente do multiplicador de volume (InpSlotMultiplier).
+
+13.3 Integração com Regra Existente de Fechamento
+
+Se InpFecharSeMaFavor = true:
+O EA continuará fechando todas as hedges quando a MA voltar a ficar a favor (comportamento antigo).
+O fechamento parcial não substitui o fechamento total — ambos podem coexistir (parcial primeiro, depois total, dependendo da ordem de execução).
+
+Recomendação: Quando usar esta nova funcionalidade, considere desativar InpFecharSeMaFavor = false para manter as hedges remanescentes abertas. 
+Obs: deixar padrão "InpFecharSeMaFavor = false"
+
+13.4 Comportamento Detalhado
+
+A verificação acontece no fecho de cada candle do InpMaTimeframe.
+Apenas hedges contrários à direção original são elegíveis para o fechamento parcial.
+O percentual é calculado e normalizado conforme o MODE_LOTSTEP do símbolo.
+Funciona tanto para a primeira proteção quanto para camadas adicionais de hedge.
+Não há movimentação de Stop Loss para Breakeven (regra removida conforme solicitação).
+Não há mais contagem de candles (opção removida).
+
+13.5 Exemplos Práticos
+
+Original: 1.00 lote BUY
+Hedge aberto: 2.00 lotes SELL (MA contra)
+→ Quando a MA voltar para ALTA (favorável ao BUY) → fecha 1.00 lote da venda (50%).
+→ Restam 1.00 lote de hedge aberto.
+Se InpPartialClosePercent = 30.0 → fecha 30% do lote do hedge ao retorno da média.
+
+13.6 Observações de Implementação
+
+O fechamento parcial deve ser executado antes de qualquer fechamento total (se InpFecharSeMaFavor estiver ativo).
+Usa a função robusta de fechamento já existente no EA.
+Em caso de falha no fechamento parcial, deve registrar no log e tentar novamente no próximo ciclo.
+Esta funcionalidade não afeta a abertura de novas hedges quando a MA estiver contra.
+================================================================================
+  Fim da especificação final — TPX - HEDGE Media9 EA.mq4
+================================================================================
