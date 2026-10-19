@@ -76,4 +76,4 @@ For EAs that use `#include` modules (ExtremeTmaTrader, HeikenTS, Tesla2, etc.), 
 ## Author
 
 **Rodrigo Escorsim** — Senior C++ & MQL Developer  
-[GitHub](https://github.com/rodrigoescorsim) · [cachesnap.com](https://cachesnap.com)
+[GitHub](https://github.com/rodrigoescorsim) · [LinkedIn](https://linkedin.com/in/rodrigoescorsim)
